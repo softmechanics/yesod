@@ -25,7 +25,12 @@ module Yesod.Form
       -- * Field/form helpers
     , fieldsToTable
     , fieldsToPlain
+    , fieldToDiv
     , checkForm
+      -- * Fieldsets
+    , FieldSet (..)
+    , FieldSets (..)
+    , withFieldSets
       -- * Template Haskell
     , mkToForm
       -- * Re-exports
@@ -37,6 +42,7 @@ import Yesod.Form.Core
 import Yesod.Form.Fields
 import Yesod.Form.Class
 import Yesod.Form.Profiles (Textarea (..))
+import Yesod.Widget
 
 import Text.Hamlet
 import Yesod.Request
@@ -73,6 +79,51 @@ fieldsToTable = mapFormXml $ mapM_ go
         ^w^
     $maybe fiErrors.fi err
         %td.errors $err$
+|]
+    clazz fi = if fiRequired fi then "required" else "optional"
+
+-- | Display the label, tooltip, input code and errors in a single div.
+fieldsToDivs :: FormField sub y a -> Form sub y a
+fieldsToDivs = mapFormXml $ mapM_ fieldToDiv
+
+-- | Display the label, tooltip, input code and errors in a single div.
+fieldToDiv :: FieldInfo sub y -> GWidget sub y ()
+fieldToDiv fi = [$hamlet|
+.$clazz$
+    %label!for=$fiIdent.fi$ $fiLabel.fi$
+        .tooltip $fiTooltip.fi$
+    ^fiInput.fi^
+    $maybe fiErrors.fi err
+        .errors $err$
+|]
+  where clazz = if fiRequired fi then "required" else "optional"
+
+data FieldSet = FieldSet { fsStart :: Int
+                         , fsLength :: Int
+                         , fsLabel :: String
+                         , fsSubSets :: [FieldSet]
+                         }
+
+type FieldSets = [FieldSet]
+
+withFieldSets :: FieldSets -> FormField sub y a -> Form sub y a
+withFieldSets = mapFormXml . withFieldSets' 0
+
+withFieldSets' :: Int -> FieldSets -> [FieldInfo sub y] -> GWidget sub y ()
+withFieldSets' _ [] fields = mapM_ fieldToDiv fields
+withFieldSets' i sets@(set:restSets) fields
+  | i < start  = do fieldToDiv $ head fields
+                    withFieldSets' (i+1) sets $ tail fields
+  | i == start = do let (setFields,restFields) = splitAt len fields
+                    wrapFieldSet lbl $ withFieldSets' 0 subSets setFields
+                    withFieldSets' (i+len) restSets restFields
+  where (FieldSet start len lbl subSets) = set
+
+wrapFieldSet :: (ToHtml l) => l -> GWidget s m a -> GWidget s m a
+wrapFieldSet lbl fields = wrapWidget fields $ \w -> [$hamlet|
+%fieldset
+  %legend $lbl$
+  ^w^
 |]
 
 runFormGeneric :: Env
