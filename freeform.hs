@@ -13,16 +13,30 @@ data Person = Person String Int String
 
 getRootR = do
     ((merr, mperson, form), enctype) <- runFormMonadGet $ do
-        (name, namef) <- stringField "Name" Nothing
-        (age, agef) <- intField "Age" $ Just 25
-        (color, colorf) <- stringField "Color" Nothing
+        (name, namef) <- stringField "Hello, my name is" Nothing
+        (age, agef) <- intField "I'm " $ Just 25
+        (color, colorf) <- stringField "My favorite color is" Nothing
         let (merr, mperson) =
                 case Person <$> name <*> age <*> color of
                     FormSuccess p -> (Nothing, Just p)
                     FormFailure e -> (Just e, Nothing)
                     FormMissing -> (Nothing, Nothing)
         let form = [$hamlet|
-Hey, my name is ^fiInput.namef^ and I'm ^fiInput.agef^ years old and my favorite color is ^fiInput.colorf^.
+%div
+  %fieldset
+    %legend Here's a nice form!
+    %div   
+      %fieldset
+        %legend Name
+          ^fieldToDiv.namef^
+    %div   
+      %fieldset
+        %legend Age
+           ^fieldToDiv.agef^
+    %div   
+      %fieldset
+        %legend Favorite color
+           ^fieldToDiv.colorf^
 |]
         return (merr, mperson, form)
     defaultLayout [$hamlet|

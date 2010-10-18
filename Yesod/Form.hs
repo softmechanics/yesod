@@ -28,6 +28,7 @@ module Yesod.Form
       -- * Field/form helpers
     , fieldsToTable
     , fieldsToDivs
+    , fieldToDiv
     , fieldsToPlain
     , checkForm
       -- * Template Haskell
@@ -45,6 +46,7 @@ import Yesod.Form.Profiles (Textarea (..))
 import Text.Hamlet
 import Yesod.Request
 import Yesod.Handler
+import Yesod.Widget
 import Control.Applicative hiding (optional)
 import Data.Maybe (fromMaybe, mapMaybe)
 import "transformers" Control.Monad.IO.Class
@@ -78,9 +80,10 @@ fieldsToTable = mapFormXml $ mapM_ go
 
 -- | Display the label, tooltip, input code and errors in a single div.
 fieldsToDivs :: FormField sub y a -> Form sub y a
-fieldsToDivs = mapFormXml $ mapM_ go
-  where
-    go fi = [$hamlet|
+fieldsToDivs = mapFormXml $ mapM_ fieldToDiv
+
+fieldToDiv :: FieldInfo sub y -> GWidget sub y ()
+fieldToDiv fi = [$hamlet|
 .$clazz.fi$
     %label!for=$fiIdent.fi$ $fiLabel.fi$
         .tooltip $fiTooltip.fi$
@@ -88,6 +91,7 @@ fieldsToDivs = mapFormXml $ mapM_ go
     $maybe fiErrors.fi err
         %div.errors $err$
 |]
+  where 
     clazz fi = if fiRequired fi then "required" else "optional"
 
 -- | Run a form against POST parameters.
