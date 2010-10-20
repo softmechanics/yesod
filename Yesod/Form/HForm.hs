@@ -30,10 +30,7 @@ type instance FormData' (HCons f fs) = (HCons (FormDataField f) (FormData' fs))
 type family FormDataField a
 type instance FormDataField (LVPair nm fld) = (LVPair nm (FieldData fld))
 
-type family FormHandler f :: * -> *
-
-class (Monad (FormHandler (FieldForm fld))
-      ,FieldTyImpl (FieldData fld)
+class (FieldTyImpl (FieldData fld)
       ) => GFormField fld where
   type FieldForm fld
   type FieldData fld 
@@ -44,7 +41,7 @@ class (Monad (FormHandler (FieldForm fld))
   formFieldDefault :: fld -> Maybe (FieldData fld)
   formFieldDefault _ = Nothing
   
-  formFieldImpl :: fld -> FormHandler (FieldForm fld) (FormField sub y (FieldData fld))
+  formFieldImpl :: (Monad m) => fld -> m (FormField sub y (FieldData fld))
   formFieldImpl fld = return $ fieldTyImpl sets def
       where def = formFieldDefault fld
             sets = formFieldSettings fld
@@ -64,17 +61,16 @@ instance FieldTyImpl [Char] where
 data FormFieldImpl = FormFieldImpl
 
 instance (GFormField f
-         ,Monad (FormHandler (FieldForm f))
-         ,h ~ (FormHandler (FieldForm f))
+         ,Monad m
          ,d ~ FieldData f
          ,impl ~ FormField sub y d
-         ) => Apply FormFieldImpl f (h impl) where
+         ) => Apply FormFieldImpl f (m impl) where
   apply _ f = formFieldImpl f
 
 data IntField nm = IntField nm FormFieldSettings 
 data SelectField nm h t = SelectField nm FormFieldSettings (h [(t,String)]) 
 
-instance (Monad (FormHandler form)
+instance (
          ) => GFormField (QualField form (IntField nm)) where
   type FieldForm (QualField form (IntField nm)) = form
   type FieldData (QualField form (IntField nm)) = Int
@@ -84,8 +80,6 @@ instance (Monad (FormHandler form)
 
 instance (FieldTyImpl t
          ,Eq t
-         ,h ~ FormHandler form
-         ,Monad (FormHandler form)
          ) => GFormField (QualField form (SelectField nm h t)) where
   type FieldForm (QualField form (SelectField nm h t)) = form
   type FieldData (QualField form (SelectField nm h t)) = t
@@ -109,8 +103,7 @@ instance (MkQualField form field
 class MkQualField form field where
   mkQualField :: form -> field -> QualField form field
   
-instance (Monad (FormHandler form)
-         ,h ~ FormHandler form
+instance (
          ) => MkQualField form (SelectField nm h t) where
   mkQualField form field = QualField form field
 
