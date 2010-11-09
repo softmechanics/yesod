@@ -1,4 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+-- | Provide the user with a rich text editor.
 module Yesod.Form.Nic
     ( YesodNic (..)
     , nicHtmlField
@@ -9,28 +12,32 @@ import Yesod.Handler
 import Yesod.Form.Core
 import Yesod.Hamlet
 import Yesod.Widget
-import qualified Data.ByteString.Lazy.UTF8 as U
-import Text.HTML.SanitizeXSS (sanitizeXSS)
+import Text.HTML.SanitizeXSS (sanitizeBalance)
+
+import Yesod.Internal (lbsToChars)
 
 class YesodNic a where
-    -- | NIC Editor.
+    -- | NIC Editor Javascript file.
     urlNicEdit :: a -> Either (Route a) String
     urlNicEdit _ = Right "http://js.nicedit.com/nicEdit-latest.js"
 
-nicHtmlField :: YesodNic y => FormFieldSettings -> FormletField sub y Html
+nicHtmlField :: (IsForm f, FormType f ~ Html, YesodNic (FormMaster f))
+             => FormFieldSettings -> Maybe Html -> f
 nicHtmlField = requiredFieldHelper nicHtmlFieldProfile
 
-maybeNicHtmlField :: YesodNic y => FormFieldSettings -> FormletField sub y (Maybe Html)
+maybeNicHtmlField
+    :: (IsForm f, FormType f ~ Maybe Html, YesodNic (FormMaster f))
+    => FormFieldSettings -> Maybe (FormType f) -> f
 maybeNicHtmlField = optionalFieldHelper nicHtmlFieldProfile
 
 nicHtmlFieldProfile :: YesodNic y => FieldProfile sub y Html
 nicHtmlFieldProfile = FieldProfile
-    { fpParse = Right . preEscapedString . sanitizeXSS
-    , fpRender = U.toString . renderHtml
+    { fpParse = Right . preEscapedString . sanitizeBalance
+    , fpRender = lbsToChars . renderHtml
     , fpWidget = \theId name val _isReq -> do
-        addBody [$hamlet|%textarea.html#$theId$!name=$name$ $val$|]
+        addHtml [$hamlet|%textarea.html#$theId$!name=$name$ $val$|]
         addScript' urlNicEdit
-        addJavascript [$julius|bkLib.onDomLoaded(function(){new nicEditor({fullPanel:true}).panelInstance("%theId%")});|]
+        addJulius [$julius|bkLib.onDomLoaded(function(){new nicEditor({fullPanel:true}).panelInstance("%theId%")});|]
     }
 
 addScript' :: (y -> Either (Route y) String) -> GWidget sub y ()

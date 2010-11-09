@@ -45,13 +45,13 @@ import Data.Maybe (fromMaybe)
 import Yesod hiding (lift)
 import Data.List (intercalate)
 import Language.Haskell.TH.Syntax
+import Web.Routes
 
 import qualified Data.ByteString.Lazy as L
 import Data.Digest.Pure.MD5
-import qualified Codec.Binary.Base64Url
-import qualified Data.ByteString as S
+import qualified Data.ByteString.Base64
+import qualified Data.ByteString.Char8 as S8
 import qualified Data.Serialize
-import Yesod.WebRoutes
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -127,6 +127,7 @@ getStaticRoute fp' = do
 
 notHidden :: FilePath -> Bool
 notHidden ('.':_) = False
+notHidden "tmp" = False
 notHidden _ = True
 
 getFileList :: FilePath -> IO [[String]]
@@ -187,8 +188,13 @@ caseGetFileList = do
 --
 -- This function returns the first 8 characters of the hash.
 base64md5 :: L.ByteString -> String
-base64md5 = take 8
-          . Codec.Binary.Base64Url.encode
-          . S.unpack
+base64md5 = map go
+          . take 8
+          . S8.unpack
+          . Data.ByteString.Base64.encode
           . Data.Serialize.encode
           . md5
+  where
+    go '+' = '-'
+    go '/' = '_'
+    go c   = c

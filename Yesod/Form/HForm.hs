@@ -25,10 +25,14 @@ type instance FormData (Record fs) = Record (FormData' fs)
 
 type family FormData' a
 type instance FormData' HNil = HNil
-type instance FormData' (HCons f fs) = (HCons (FormDataField f) (FormData' fs))
+type instance FormData' (HCons f fs) = HConsF (FormDataField f) (FormData' fs)
+
+type family HConsF e l
+type instance HConsF HNil l = l
+type instance HConsF e l = HCons e l
 
 type family FormDataField a
-type instance FormDataField (LVPair nm fld) = (LVPair nm (FieldData fld))
+type instance FormDataField (LVPair nm fld) = LVPair nm (FieldData fld)
 
 type HFormHandler f = GHandler (HFormSub f) (HFormMaster f) 
 
@@ -162,7 +166,13 @@ formConstructor :: (Apply Constructor (FormData f) c
                    ) => f -> c
 formConstructor = constructor . formData
 
-hFormFields :: (RecordValues r vs
+data HFormFieldsF = HFormFieldsF
+
+instance Apply HFormFieldsF (LVPair lbl fld, flds) (HCons lbl flds) where
+  apply _ (LVPair fld, flds) = HCons fld flds
+
+
+hFormFields :: (HFoldr HFormFieldsF HNil r vs
                ,HMap f vs vs'
                ,HSequence vs' vs''
                ) => f -> Record r -> vs''

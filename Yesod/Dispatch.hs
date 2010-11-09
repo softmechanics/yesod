@@ -39,7 +39,6 @@ import Web.Routes.Quasi
 import Web.Routes.Quasi.Parse
 import Web.Routes.Quasi.TH
 import Language.Haskell.TH.Syntax
-import Yesod.WebRoutes
 
 import qualified Network.Wai as W
 import Network.Wai.Middleware.CleanPath (cleanPathFunc)
@@ -51,8 +50,6 @@ import qualified Network.Wai.Handler.CGI as CGI
 import System.Environment (getEnvironment)
 
 import qualified Data.ByteString.Char8 as B
-
-import qualified Data.ByteString.UTF8 as S
 
 import Control.Concurrent.MVar
 import Control.Arrow ((***))
@@ -70,6 +67,11 @@ import qualified Data.Serialize as Ser
 import Network.Wai.Parse hiding (FileInfo)
 import qualified Network.Wai.Parse as NWP
 import Data.String (fromString)
+import Web.Routes
+import Control.Arrow (first)
+import System.Random (randomR, newStdGen)
+
+import qualified Data.Map as Map
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -225,7 +227,7 @@ toWaiApp' y segments env = do
     now <- getCurrentTime
     let getExpires m = fromIntegral (m * 60) `addUTCTime` now
     let exp' = getExpires $ clientSessionDuration y
-    let host = W.remoteHost env
+    let host = if sessionIpAddress y then W.remoteHost env else ""
     let session' = fromMaybe [] $ do
             raw <- lookup "Cookie" $ W.requestHeaders env
             val <- lookup (B.pack sessionName) $ parseCookies raw
@@ -265,13 +267,17 @@ toWaiApp' y segments env = do
     let eurl' = either (const Nothing) Just eurl
     let eh er = runHandler (errorHandler' er) render eurl' id y id
     let ya = runHandler h render eurl' id y id
-    (s, hs, ct, c, sessionFinal) <- unYesodApp ya eh rr types
-    let sessionVal = encodeSession key' exp' host sessionFinal
+    let sessionMap = Map.fromList
+                   $ filter (\(x, _) -> x /= nonceKey) session'
+    (s, hs, ct, c, sessionFinal) <- unYesodApp ya eh rr types sessionMap
+    let sessionVal = encodeSession key' exp' host
+                   $ Map.toList
+                   $ Map.insert nonceKey (reqNonce rr) sessionFinal
     let hs' = AddCookie (clientSessionDuration y) sessionName
-                                                  (S.toString sessionVal)
+                                                  (bsToChars sessionVal)
             : hs
         hs'' = map (headerToPair getExpires) hs'
-        hs''' = ("Content-Type", S.fromString ct) : hs''
+        hs''' = ("Content-Type", charsToBs ct) : hs''
     return $ W.Response s hs''' c
 
 httpAccept :: W.Request -> [ContentType]
@@ -313,13 +319,13 @@ parseWaiRequest :: W.Request
                 -> [(String, String)] -- ^ session
                 -> IO Request
 parseWaiRequest env session' = do
-    let gets' = map (S.toString *** S.toString)
+    let gets' = map (bsToChars *** bsToChars)
               $ parseQueryString $ W.queryString env
     let reqCookie = fromMaybe B.empty $ lookup "Cookie"
                   $ W.requestHeaders env
-        cookies' = map (S.toString *** S.toString) $ parseCookies reqCookie
+        cookies' = map (bsToChars *** bsToChars) $ parseCookies reqCookie
         acceptLang = lookup "Accept-Language" $ W.requestHeaders env
-        langs = map S.toString $ maybe [] parseHttpAccept acceptLang
+        langs = map bsToChars $ maybe [] parseHttpAccept acceptLang
         langs' = case lookup langKey session' of
                     Nothing -> langs
                     Just x -> x : langs
@@ -330,13 +336,33 @@ parseWaiRequest env session' = do
                      Nothing -> langs''
                      Just x -> x : langs''
     rbthunk <- iothunk $ rbHelper env
-    return $ Request gets' cookies' session' rbthunk env langs'''
+    nonce <- case lookup nonceKey session' of
+                Just x -> return x
+                Nothing -> do
+                    g <- newStdGen
+                    return $ fst $ randomString 10 g
+    return $ Request gets' cookies' rbthunk env langs''' nonce
+  where
+    randomString len =
+        first (map toChar) . sequence' (replicate len (randomR (0, 61)))
+    sequence' [] g = ([], g)
+    sequence' (f:fs) g =
+        let (f', g') = f g
+            (fs', g'') = sequence' fs g'
+         in (f' : fs', g'')
+    toChar i
+        | i < 26 = toEnum $ i + fromEnum 'A'
+        | i < 52 = toEnum $ i + fromEnum 'a' - 26
+        | otherwise = toEnum $ i + fromEnum '0' - 52
+
+nonceKey :: String
+nonceKey = "_NONCE"
 
 rbHelper :: W.Request -> IO RequestBodyContents
 rbHelper = fmap (fix1 *** map fix2) . parseRequestBody lbsSink where
-    fix1 = map (S.toString *** S.toString)
+    fix1 = map (bsToChars *** bsToChars)
     fix2 (x, NWP.FileInfo a b c) =
-        (S.toString x, FileInfo (S.toString a) (S.toString b) c)
+        (bsToChars x, FileInfo (bsToChars a) (bsToChars b) c)
 
 -- | Produces a \"compute on demand\" value. The computation will be run once
 -- it is requested, and then the result will be stored. This will happen only
@@ -357,14 +383,14 @@ headerToPair :: (Int -> UTCTime) -- ^ minutes -> expiration time
              -> (W.ResponseHeader, B.ByteString)
 headerToPair getExpires (AddCookie minutes key value) =
     let expires = getExpires minutes
-     in ("Set-Cookie", S.fromString
+     in ("Set-Cookie", charsToBs
                             $ key ++ "=" ++ value ++"; path=/; expires="
                               ++ formatW3 expires)
 headerToPair _ (DeleteCookie key) =
-    ("Set-Cookie", S.fromString $
+    ("Set-Cookie", charsToBs $
      key ++ "=; path=/; expires=Thu, 01-Jan-1970 00:00:00 GMT")
 headerToPair _ (Header key value) =
-    (fromString key, S.fromString value)
+    (fromString key, charsToBs value)
 
 encodeSession :: CS.Key
               -> UTCTime -- ^ expire time

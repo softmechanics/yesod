@@ -36,6 +36,7 @@ module Yesod.Yesod
 import Yesod.Content hiding (testSuite)
 import Yesod.Json hiding (testSuite)
 import Yesod.Handler hiding (testSuite)
+import qualified Data.ByteString.UTF8 as BSU
 #else
 import Yesod.Content
 import Yesod.Json
@@ -49,20 +50,19 @@ import qualified Network.Wai as W
 import Yesod.Internal
 import Web.ClientSession (getKey, defaultKeyFile)
 import qualified Web.ClientSession as CS
-import qualified Data.ByteString.UTF8 as BSU
 import Database.Persist
 import Control.Monad.Trans.Class (MonadTrans (..))
-import Control.Monad.Attempt (Failure)
+import Control.Failure (Failure)
 import qualified Data.ByteString as S
 import qualified Network.Wai.Middleware.CleanPath
 import qualified Data.ByteString.Lazy as L
-import Yesod.WebRoutes
 import Data.Monoid
 import Control.Monad.Trans.Writer
 import Control.Monad.Trans.State hiding (get)
 import Text.Hamlet
 import Text.Cassius
 import Text.Julius
+import Web.Routes
 
 #if TEST
 import Test.Framework (testGroup, Test)
@@ -209,6 +209,11 @@ class Eq (Route a) => Yesod a where
                      -> GHandler sub a (Maybe (Either String (Route a, [(String, String)])))
     addStaticContent _ _ _ = return Nothing
 
+    -- | Whether or not to tie a session to a specific IP address. Defaults to
+    -- 'True'.
+    sessionIpAddress :: a -> Bool
+    sessionIpAddress _ = True
+
 data AuthResult = Authorized | AuthenticationRequired | Unauthorized String
     deriving (Eq, Show, Read)
 
@@ -256,13 +261,13 @@ applyLayout' :: Yesod master
              -> GHandler sub master ChooseRep
 applyLayout' title body = fmap chooseRep $ defaultLayout $ do
     setTitle title
-    addBody body
+    addHamlet body
 
 -- | The default error handler for 'errorHandler'.
 defaultErrorHandler :: Yesod y => ErrorResponse -> GHandler sub y ChooseRep
 defaultErrorHandler NotFound = do
     r <- waiRequest
-    let path' = BSU.toString $ pathInfo r
+    let path' = bsToChars $ pathInfo r
     applyLayout' "Not Found" $ [$hamlet|
 %h1 Not Found
 %p $path'$

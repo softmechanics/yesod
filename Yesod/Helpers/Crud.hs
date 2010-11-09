@@ -55,7 +55,7 @@ getCrudListR = do
     toMaster <- getRouteToMaster
     defaultLayout $ do
         setTitle "Items"
-        addBody [$hamlet|
+        addWidget [$hamlet|
 %h1 Items
 %ul
     $forall items item
@@ -115,7 +115,7 @@ getCrudDeleteR s = do
     toMaster <- getRouteToMaster
     defaultLayout $ do
         setTitle "Confirm delete"
-        addBody [$hamlet|
+        addWidget [$hamlet|
 %form!method=post!action=@toMaster.CrudDeleteR.s@
     %h1 Really delete?
     %p Do you really want to delete $itemTitle.item$?
@@ -143,7 +143,7 @@ crudHelper
     -> GHandler (Crud master a) master RepHtml
 crudHelper title me isPost = do
     crud <- getYesodSub
-    (errs, form, enctype) <- runFormPost $ toForm $ fmap snd me
+    (errs, form, enctype, hidden) <- runFormPost $ toForm $ fmap snd me
     toMaster <- getRouteToMaster
     case (isPost, errs) of
         (True, FormSuccess a) -> do
@@ -156,10 +156,8 @@ crudHelper title me isPost = do
                                        $ toSinglePiece eid
         _ -> return ()
     defaultLayout $ do
-        wrapWidget form (wrapForm toMaster enctype)
         setTitle $ string title
-  where
-    wrapForm toMaster enctype form = [$hamlet|
+        addWidget [$hamlet|
 %p
     %a!href=@toMaster.CrudListR@ Return to list
 %h1 $title$
@@ -168,6 +166,7 @@ crudHelper title me isPost = do
         ^form^
         %tr
             %td!colspan=2
+                $hidden$
                 %input!type=submit
                 $maybe me e
                     \ $

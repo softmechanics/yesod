@@ -21,20 +21,21 @@ import Yesod.Form.Core
 import Yesod.Widget
 import Text.Hamlet
 import Data.Time (Day, TimeOfDay(..))
-import qualified Data.ByteString.Lazy.UTF8 as U
 import qualified Text.Email.Validate as Email
 import Network.URI (parseURI)
 import Database.Persist (PersistField)
-import Text.HTML.SanitizeXSS (sanitizeXSS)
+import Text.HTML.SanitizeXSS (sanitizeBalance)
 
 import Text.Blaze.Builder.Utf8 (writeChar)
 import Text.Blaze.Builder.Core (writeList, writeByteString)
+
+import Yesod.Internal (lbsToChars)
 
 intFieldProfile :: Integral i => FieldProfile sub y i
 intFieldProfile = FieldProfile
     { fpParse = maybe (Left "Invalid integer") Right . readMayI
     , fpRender = showI
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=number!:isReq:required!value=$val$
 |]
     }
@@ -48,7 +49,7 @@ doubleFieldProfile :: FieldProfile sub y Double
 doubleFieldProfile = FieldProfile
     { fpParse = maybe (Left "Invalid number") Right . readMay
     , fpRender = show
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=text!:isReq:required!value=$val$
 |]
     }
@@ -57,7 +58,7 @@ dayFieldProfile :: FieldProfile sub y Day
 dayFieldProfile = FieldProfile
     { fpParse = parseDate
     , fpRender = show
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=date!:isReq:required!value=$val$
 |]
     }
@@ -66,16 +67,16 @@ timeFieldProfile :: FieldProfile sub y TimeOfDay
 timeFieldProfile = FieldProfile
     { fpParse = parseTime
     , fpRender = show
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!:isReq:required!value=$val$
 |]
     }
 
 htmlFieldProfile :: FieldProfile sub y Html
 htmlFieldProfile = FieldProfile
-    { fpParse = Right . preEscapedString . sanitizeXSS
-    , fpRender = U.toString . renderHtml
-    , fpWidget = \theId name val _isReq -> addBody [$hamlet|
+    { fpParse = Right . preEscapedString . sanitizeBalance
+    , fpRender = lbsToChars . renderHtml
+    , fpWidget = \theId name val _isReq -> addHamlet [$hamlet|
 %textarea.html#$theId$!name=$name$ $val$
 |]
     }
@@ -101,7 +102,7 @@ textareaFieldProfile :: FieldProfile sub y Textarea
 textareaFieldProfile = FieldProfile
     { fpParse = Right . Textarea
     , fpRender = unTextarea
-    , fpWidget = \theId name val _isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val _isReq -> addHamlet [$hamlet|
 %textarea#$theId$!name=$name$ $val$
 |]
     }
@@ -110,7 +111,7 @@ hiddenFieldProfile :: FieldProfile sub y String
 hiddenFieldProfile = FieldProfile
     { fpParse = Right
     , fpRender = id
-    , fpWidget = \theId name val _isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val _isReq -> addHamlet [$hamlet|
 %input!type=hidden#$theId$!name=$name$!value=$val$
 |]
     }
@@ -119,7 +120,7 @@ stringFieldProfile :: FieldProfile sub y String
 stringFieldProfile = FieldProfile
     { fpParse = Right
     , fpRender = id
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=text!:isReq:required!value=$val$
 |]
     }
@@ -168,7 +169,7 @@ emailFieldProfile = FieldProfile
                         then Right s
                         else Left "Invalid e-mail address"
     , fpRender = id
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=email!:isReq:required!value=$val$
 |]
     }
@@ -179,7 +180,7 @@ urlFieldProfile = FieldProfile
                         Nothing -> Left "Invalid URL"
                         Just _ -> Right s
     , fpRender = id
-    , fpWidget = \theId name val isReq -> addBody [$hamlet|
+    , fpWidget = \theId name val isReq -> addHamlet [$hamlet|
 %input#$theId$!name=$name$!type=url!:isReq:required!value=$val$
 |]
     }

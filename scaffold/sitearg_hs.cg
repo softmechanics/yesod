@@ -4,6 +4,7 @@ module ~sitearg~
     , ~sitearg~Route (..)
     , resources~sitearg~
     , Handler
+    , Widget
     , maybeAuth
     , requireAuth
     , module Yesod
@@ -14,18 +15,22 @@ module ~sitearg~
     ) where
 
 import Yesod
-import Yesod.Mail
 import Yesod.Helpers.Static
 import Yesod.Helpers.Auth
+import Yesod.Helpers.Auth.OpenId
+import Yesod.Helpers.Auth.Email
 import qualified Settings
 import System.Directory
 import qualified Data.ByteString.Lazy as L
-import Yesod.WebRoutes
+import Web.Routes.Site (Site (formatPathSegments))
 import Database.Persist.GenericSql
 import Settings (hamletFile, cassiusFile, juliusFile)
 import Model
-import Control.Monad (join)
 import Data.Maybe (isJust)
+import Control.Monad (join)
+import Network.Mail.Mime
+import qualified Data.Text.Lazy
+import qualified Data.Text.Lazy.Encoding
 
 -- | The site argument for your application. This can be a good place to
 -- keep settings and values requiring initialization before your application
@@ -39,6 +44,10 @@ data ~sitearg~ = ~sitearg~
 -- | A useful synonym; most of the handler functions in your application
 -- will need to be of this type.
 type Handler = GHandler ~sitearg~ ~sitearg~
+
+-- | A useful synonym; most of the widgets functions in your application
+-- will need to be of this type.
+type Widget = GWidget ~sitearg~ ~sitearg~
 
 -- This is where we define all of the routes in our application. For a full
 -- explanation of the syntax, please see:
@@ -78,7 +87,7 @@ instance Yesod ~sitearg~ where
         mmsg <- getMessage
         pc <- widgetToPageContent $ do
             widget
-            addStyle $(Settings.cassiusFile "default-layout")
+            addCassius $(Settings.cassiusFile "default-layout")
         hamletToRepHtml $(Settings.hamletFile "default-layout")
 
     -- This is done to provide an optimization for serving static files from
@@ -111,72 +120,93 @@ instance YesodPersist ~sitearg~ where
     runDB db = fmap connPool getYesod >>= Settings.runConnectionPool db
 
 instance YesodAuth ~sitearg~ where
-    type AuthEntity ~sitearg~ = User
-    type AuthEmailEntity ~sitearg~ = Email
+    type AuthId ~sitearg~ = UserId
 
-    defaultDest _ = RootR
+    -- Where to send a user after successful login
+    loginDest _ = RootR
+    -- Where to send a user after logout
+    logoutDest _ = RootR
 
-    getAuthId creds _extra = runDB $ do
+    getAuthId creds = runDB $ do
         x <- getBy $ UniqueUser $ credsIdent creds
         case x of
             Just (uid, _) -> return $ Just uid
             Nothing -> do
                 fmap Just $ insert $ User (credsIdent creds) Nothing
 
-    openIdEnabled _ = True
+    showAuthId _ = showIntegral
+    readAuthId _ = readIntegral
 
-    emailSettings _ = Just EmailSettings
-        { addUnverified = \email verkey ->
-            runDB $ insert $ Email email Nothing (Just verkey)
-        , sendVerifyEmail = sendVerifyEmail'
-        , getVerifyKey = runDB . fmap (join . fmap emailVerkey) . get
-        , setVerifyKey = \eid key -> runDB $ update eid [EmailVerkey $ Just key]
-        , verifyAccount = \eid -> runDB $ do
-            me <- get eid
-            case me of
-                Nothing -> return Nothing
-                Just e -> do
-                    let email = emailEmail e
-                    case emailUser e of
-                        Just uid -> return $ Just uid
-                        Nothing -> do
-                            uid <- insert $ User email Nothing
-                            update eid [EmailUser $ Just uid]
-                            return $ Just uid
-        , getPassword = runDB . fmap (join . fmap userPassword) . get
-        , setPassword = \uid pass -> runDB $ update uid [UserPassword $ Just pass]
-        , getEmailCreds = \email -> runDB $ do
-            me <- getBy $ UniqueEmail email
-            case me of
-                Nothing -> return Nothing
-                Just (eid, e) -> return $ Just EmailCreds
-                    { emailCredsId = eid
-                    , emailCredsAuthId = emailUser e
-                    , emailCredsStatus = isJust $ emailUser e
-                    , emailCredsVerkey = emailVerkey e
-                    }
-        , getEmail = runDB . fmap (fmap emailEmail) . get
+    authPlugins = [ authOpenId
+                  , authEmail
+                  ]
+
+instance YesodAuthEmail ~sitearg~ where
+    type AuthEmailId ~sitearg~ = EmailId
+
+    showAuthEmailId _ = showIntegral
+    readAuthEmailId _ = readIntegral
+
+    addUnverified email verkey =
+        runDB $ insert $ Email email Nothing $ Just verkey
+    sendVerifyEmail email _ verurl = liftIO $ renderSendMail Mail
+        { mailHeaders =
+            [ ("From", "noreply")
+            , ("To", email)
+            , ("Subject", "Verify your email address")
+            ]
+        , mailParts = [[textPart, htmlPart]]
         }
-
-sendVerifyEmail' :: String -> String -> String -> GHandler Auth m ()
-sendVerifyEmail' email _ verurl =
-    liftIO $ renderSendMail Mail
-            { mailHeaders =
-                [ ("From", "noreply")
-                , ("To", email)
-                , ("Subject", "Verify your email address")
+      where
+        textPart = Part
+            { partType = "text/plain; charset=utf-8"
+            , partEncoding = None
+            , partFilename = Nothing
+            , partContent = Data.Text.Lazy.Encoding.encodeUtf8
+                          $ Data.Text.Lazy.pack $ unlines
+                [ "Please confirm your email address by clicking on the link below."
+                , ""
+                , verurl
+                , ""
+                , "Thank you"
                 ]
-            , mailPlain = verurl
-            , mailParts = return Part
-                { partType = "text/html; charset=utf-8"
-                , partEncoding = None
-                , partDisposition = Inline
-                , partContent = renderHamlet id [$hamlet|
+            }
+        htmlPart = Part
+            { partType = "text/html; charset=utf-8"
+            , partEncoding = None
+            , partFilename = Nothing
+            , partContent = renderHtml [$hamlet|
 %p Please confirm your email address by clicking on the link below.
 %p
     %a!href=$verurl$ $verurl$
 %p Thank you
-|~~]
-                }
+|]
             }
+    getVerifyKey = runDB . fmap (join . fmap emailVerkey) . get
+    setVerifyKey eid key = runDB $ update eid [EmailVerkey $ Just key]
+    verifyAccount eid = runDB $ do
+        me <- get eid
+        case me of
+            Nothing -> return Nothing
+            Just e -> do
+                let email = emailEmail e
+                case emailUser e of
+                    Just uid -> return $ Just uid
+                    Nothing -> do
+                        uid <- insert $ User email Nothing
+                        update eid [EmailUser $ Just uid, EmailVerkey Nothing]
+                        return $ Just uid
+    getPassword = runDB . fmap (join . fmap userPassword) . get
+    setPassword uid pass = runDB $ update uid [UserPassword $ Just pass]
+    getEmailCreds email = runDB $ do
+        me <- getBy $ UniqueEmail email
+        case me of
+            Nothing -> return Nothing
+            Just (eid, e) -> return $ Just EmailCreds
+                { emailCredsId = eid
+                , emailCredsAuthId = emailUser e
+                , emailCredsStatus = isJust $ emailUser e
+                , emailCredsVerkey = emailVerkey e
+                }
+    getEmail = runDB . fmap (fmap emailEmail) . get
 

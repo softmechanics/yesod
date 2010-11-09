@@ -1,4 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+-- | Some fields spiced up with jQuery UI.
 module Yesod.Form.Jquery
     ( YesodJquery (..)
     , jqueryDayField
@@ -9,6 +12,8 @@ module Yesod.Form.Jquery
     , maybeJqueryAutocompleteField
     , jqueryDayFieldProfile
     , googleHostedJqueryUiCss
+    , JqueryDaySettings (..)
+    , Default (..)
     ) where
 
 import Yesod.Handler
@@ -19,6 +24,7 @@ import Data.Time (UTCTime (..), Day, TimeOfDay (..), timeOfDayToTime,
                   timeToTimeOfDay)
 import Yesod.Hamlet
 import Data.Char (isSpace)
+import Data.Default
 
 -- | Gets the Google hosted jQuery UI 1.8 CSS file with the given theme.
 googleHostedJqueryUiCss :: String -> String
@@ -45,30 +51,57 @@ class YesodJquery a where
     urlJqueryUiDateTimePicker :: a -> Either (Route a) String
     urlJqueryUiDateTimePicker _ = Right "http://github.com/gregwebs/jquery.ui.datetimepicker/raw/master/jquery.ui.datetimepicker.js"
 
-jqueryDayField :: YesodJquery y => FormFieldSettings -> FormletField sub y Day
-jqueryDayField = requiredFieldHelper jqueryDayFieldProfile
+jqueryDayField :: (IsForm f, FormType f ~ Day, YesodJquery (FormMaster f))
+               => JqueryDaySettings
+               -> FormFieldSettings
+               -> Maybe (FormType f)
+               -> f
+jqueryDayField = requiredFieldHelper . jqueryDayFieldProfile
 
-maybeJqueryDayField :: YesodJquery y => FormFieldSettings -> FormletField sub y (Maybe Day)
-maybeJqueryDayField = optionalFieldHelper jqueryDayFieldProfile
+maybeJqueryDayField
+    :: (IsForm f, FormType f ~ Maybe Day, YesodJquery (FormMaster f))
+    => JqueryDaySettings
+    -> FormFieldSettings
+    -> Maybe (FormType f)
+    -> f
+maybeJqueryDayField = optionalFieldHelper . jqueryDayFieldProfile
 
-jqueryDayFieldProfile :: YesodJquery y => FieldProfile sub y Day
-jqueryDayFieldProfile = FieldProfile
+jqueryDayFieldProfile :: YesodJquery y
+                      => JqueryDaySettings -> FieldProfile sub y Day
+jqueryDayFieldProfile jds = FieldProfile
     { fpParse = maybe
                   (Left "Invalid day, must be in YYYY-MM-DD format")
                   Right
               . readMay
     , fpRender = show
     , fpWidget = \theId name val isReq -> do
-        addBody [$hamlet|
+        addHtml [$hamlet|
 %input#$theId$!name=$name$!type=date!:isReq:required!value=$val$
 |]
         addScript' urlJqueryJs
         addScript' urlJqueryUiJs
         addStylesheet' urlJqueryUiCss
-        addJavascript [$julius|
-$(function(){$("#%theId%").datepicker({dateFormat:'yy-mm-dd'})});
+        addJulius [$julius|
+$(function(){$("#%theId%").datepicker({
+    dateFormat:'yy-mm-dd',
+    changeMonth:%jsBool.jdsChangeMonth.jds%,
+    changeYear:%jsBool.jdsChangeYear.jds%,
+    numberOfMonths:%mos.jdsNumberOfMonths.jds%,
+    yearRange:"%jdsYearRange.jds%"
+})});
 |]
     }
+  where
+    jsBool True = "true"
+    jsBool False = "false"
+    mos (Left i) = show i
+    mos (Right (x, y)) = concat
+        [ "["
+        , show x
+        , ","
+        , show y
+        , "]"
+        ]
 
 ifRight :: Either a b -> (b -> c) -> Either a c
 ifRight e f = case e of
@@ -78,7 +111,11 @@ ifRight e f = case e of
 showLeadingZero :: (Show a) => a -> String
 showLeadingZero time = let t = show time in if length t == 1 then "0" ++ t else t
 
-jqueryDayTimeField :: YesodJquery y => FormFieldSettings -> FormletField sub y UTCTime
+jqueryDayTimeField
+    :: (IsForm f, FormType f ~ UTCTime, YesodJquery (FormMaster f))
+    => FormFieldSettings
+    -> Maybe (FormType f)
+    -> f
 jqueryDayTimeField = requiredFieldHelper jqueryDayTimeFieldProfile
 
 -- use A.M/P.M and drop seconds and "UTC" (as opposed to normal UTCTime show)
@@ -96,14 +133,14 @@ jqueryDayTimeFieldProfile = FieldProfile
     { fpParse  = parseUTCTime
     , fpRender = jqueryDayTimeUTCTime
     , fpWidget = \theId name val isReq -> do
-        addBody [$hamlet|
+        addHtml [$hamlet|
 %input#$theId$!name=$name$!:isReq:required!value=$val$
 |]
         addScript' urlJqueryJs
         addScript' urlJqueryUiJs
         addScript' urlJqueryUiDateTimePicker
         addStylesheet' urlJqueryUiCss
-        addJavascript [$julius|
+        addJulius [$julius|
 $(function(){$("#%theId%").datetimepicker({dateFormat : "yyyy/mm/dd h:MM TT"})});
 |]
     }
@@ -118,12 +155,20 @@ parseUTCTime s =
                 ifRight (parseTime timeS)
                     (UTCTime date . timeOfDayToTime)
 
-jqueryAutocompleteField :: YesodJquery y =>
-    Route y -> FormFieldSettings -> FormletField sub y String
+jqueryAutocompleteField
+    :: (IsForm f, FormType f ~ String, YesodJquery (FormMaster f))
+    => Route (FormMaster f)
+    -> FormFieldSettings
+    -> Maybe (FormType f)
+    -> f
 jqueryAutocompleteField = requiredFieldHelper . jqueryAutocompleteFieldProfile
 
-maybeJqueryAutocompleteField :: YesodJquery y =>
-    Route y -> FormFieldSettings -> FormletField sub y (Maybe String)
+maybeJqueryAutocompleteField
+    :: (IsForm f, FormType f ~ Maybe String, YesodJquery (FormMaster f))
+    => Route (FormMaster f)
+    -> FormFieldSettings
+    -> Maybe (FormType f)
+    -> f
 maybeJqueryAutocompleteField src =
     optionalFieldHelper $ jqueryAutocompleteFieldProfile src
 
@@ -132,13 +177,13 @@ jqueryAutocompleteFieldProfile src = FieldProfile
     { fpParse = Right
     , fpRender = id
     , fpWidget = \theId name val isReq -> do
-        addBody [$hamlet|
+        addHtml [$hamlet|
 %input.autocomplete#$theId$!name=$name$!type=text!:isReq:required!value=$val$
 |]
         addScript' urlJqueryJs
         addScript' urlJqueryUiJs
         addStylesheet' urlJqueryUiCss
-        addJavascript [$julius|
+        addJulius [$julius|
 $(function(){$("#%theId%").autocomplete({source:"@src@",minLength:2})});
 |]
     }
@@ -162,3 +207,18 @@ readMay s = case reads s of
 -- from http://hackage.haskell.org/packages/archive/cgi/3001.1.7.1/doc/html/src/Network-CGI-Protocol.html#replace
 replace :: Eq a => a -> a -> [a] -> [a]
 replace x y = map (\z -> if z == x then y else z)
+
+data JqueryDaySettings = JqueryDaySettings
+    { jdsChangeMonth :: Bool
+    , jdsChangeYear :: Bool
+    , jdsYearRange :: String
+    , jdsNumberOfMonths :: Either Int (Int, Int)
+    }
+
+instance Default JqueryDaySettings where
+    def = JqueryDaySettings
+        { jdsChangeMonth = False
+        , jdsChangeYear = False
+        , jdsYearRange = "c-10:c+10"
+        , jdsNumberOfMonths = Left 1
+        }

@@ -28,13 +28,11 @@ module Yesod.Request
     , lookupGetParam
     , lookupPostParam
     , lookupCookie
-    , lookupSession
     , lookupFile
       -- ** Multi-lookup
     , lookupGetParams
     , lookupPostParams
     , lookupCookies
-    , lookupSessions
     , lookupFiles
       -- * Parameter type synonyms
     , ParamName
@@ -98,8 +96,6 @@ data FileInfo = FileInfo
 data Request = Request
     { reqGetParams :: [(ParamName, ParamValue)]
     , reqCookies :: [(ParamName, ParamValue)]
-      -- | Session data stored in a cookie via the clientsession package.
-    , reqSession :: [(ParamName, ParamValue)]
       -- | The POST parameters and submitted files. This is stored in an IO
       -- thunk, which essentially means it will be computed once at most, but
       -- only if requested. This allows avoidance of the potentially costly
@@ -108,6 +104,8 @@ data Request = Request
     , reqWaiRequest :: W.Request
       -- | Languages which the client supports.
     , reqLangs :: [String]
+      -- | A random, session-specific nonce used to prevent CSRF attacks.
+    , reqNonce :: String
     }
 
 lookup' :: Eq a => a -> [(a, b)] -> [b]
@@ -161,13 +159,3 @@ lookupCookies :: RequestReader m => ParamName -> m [ParamValue]
 lookupCookies pn = do
     rr <- getRequest
     return $ lookup' pn $ reqCookies rr
-
--- | Lookup for session data.
-lookupSession :: RequestReader m => ParamName -> m (Maybe ParamValue)
-lookupSession = liftM listToMaybe . lookupSessions
-
--- | Lookup for session data.
-lookupSessions :: RequestReader m => ParamName -> m [ParamValue]
-lookupSessions pn = do
-    rr <- getRequest
-    return $ lookup' pn $ reqSession rr

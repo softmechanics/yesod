@@ -8,24 +8,29 @@
 module Yesod.Widget
     ( -- * Datatype
       GWidget (..)
-    , Widget
     , liftHandler
       -- * Creating
-    , newIdent
+      -- ** Head of page
     , setTitle
-    , addStyle
+    , addHamletHead
+    , addHtmlHead
+      -- ** Body
+    , addHamlet
+    , addHtml
+    , addWidget
+      -- ** CSS
+    , addCassius
     , addStylesheet
     , addStylesheetRemote
     , addStylesheetEither
+      -- ** Javascript
+    , addJulius
     , addScript
     , addScriptRemote
     , addScriptEither
-    , addHead
-    , addBody
-    , addJavascript
-      -- * Manipulating
-    , wrapWidget
+      -- * Utilities
     , extractBody
+    , newIdent
     ) where
 
 import Data.Monoid
@@ -34,17 +39,22 @@ import Control.Monad.Trans.State
 import Text.Hamlet
 import Text.Cassius
 import Text.Julius
-import Yesod.Handler (Route, GHandler)
+import Yesod.Handler (Route, GHandler, HandlerData)
 import Control.Applicative (Applicative)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Trans.Class (lift)
-import "MonadCatchIO-transformers" Control.Monad.CatchIO (MonadCatchIO)
 import Yesod.Internal
+
+import Control.Monad.Invert (MonadInvertIO (..))
+import Control.Monad (liftM)
+import qualified Data.Map as Map
 
 -- | A generic widget, allowing specification of both the subsite and master
 -- site datatypes. This is basically a large 'WriterT' stack keeping track of
 -- dependencies along with a 'StateT' to track unique identifiers.
-newtype GWidget sub master a = GWidget (
+newtype GWidget s m a = GWidget { unGWidget :: GWInner s m a }
+    deriving (Functor, Applicative, Monad, MonadIO)
+type GWInner sub master =
     WriterT (Body (Route master)) (
     WriterT (Last Title) (
     WriterT (UniqueList (Script (Route master))) (
@@ -54,22 +64,28 @@ newtype GWidget sub master a = GWidget (
     WriterT (Head (Route master)) (
     StateT Int (
     GHandler sub master
-    )))))))) a)
-    deriving (Functor, Applicative, Monad, MonadIO, MonadCatchIO)
+    ))))))))
 instance Monoid (GWidget sub master ()) where
     mempty = return ()
     mappend x y = x >> y
--- | A 'GWidget' specialized to when the subsite and master site are the same.
-type Widget y = GWidget y y
+instance MonadInvertIO (GWidget s m) where
+    newtype InvertedIO (GWidget s m) a =
+        InvGWidgetIO
+            { runInvGWidgetIO :: InvertedIO (GWInner s m) a
+            }
+    type InvertedArg (GWidget s m) =
+        (Int, (HandlerData s m, (Map.Map String String, ())))
+    invertIO = liftM (fmap InvGWidgetIO) . invertIO . unGWidget
+    revertIO f = GWidget $ revertIO $ liftM runInvGWidgetIO . f
 
 instance HamletValue (GWidget s m ()) where
     newtype HamletMonad (GWidget s m ()) a =
         GWidget' { runGWidget' :: GWidget s m a }
     type HamletUrl (GWidget s m ()) = Route m
     toHamletValue = runGWidget'
-    htmlToHamletMonad = GWidget' . addBody . const
+    htmlToHamletMonad = GWidget' . addHtml
     urlToHamletMonad url params = GWidget' $
-        addBody $ \r -> preEscapedString (r url params)
+        addHamlet $ \r -> preEscapedString (r url params)
     fromHamletValue = GWidget'
 instance Monad (HamletMonad (GWidget s m ())) where
     return = GWidget' . return
@@ -85,13 +101,26 @@ liftHandler = GWidget . lift . lift . lift . lift . lift . lift . lift . lift
 setTitle :: Html -> GWidget sub master ()
 setTitle = GWidget . lift . tell . Last . Just . Title
 
--- | Add some raw HTML to the head tag.
-addHead :: Hamlet (Route master) -> GWidget sub master ()
-addHead = GWidget . lift . lift . lift . lift . lift . lift . tell . Head
+-- | Add a 'Hamlet' to the head tag.
+addHamletHead :: Hamlet (Route master) -> GWidget sub master ()
+addHamletHead = GWidget . lift . lift . lift . lift . lift . lift . tell . Head
 
--- | Add some raw HTML to the body tag.
-addBody :: Hamlet (Route master) -> GWidget sub master ()
-addBody = GWidget . tell . Body
+-- | Add a 'Html' to the head tag.
+addHtmlHead :: Html -> GWidget sub master ()
+addHtmlHead = GWidget . lift . lift . lift . lift . lift . lift . tell . Head . const
+
+-- | Add a 'Hamlet' to the body tag.
+addHamlet :: Hamlet (Route master) -> GWidget sub master ()
+addHamlet = GWidget . tell . Body
+
+-- | Add a 'Html' to the body tag.
+addHtml :: Html -> GWidget sub master ()
+addHtml = GWidget . tell . Body . const
+
+-- | Add another widget. This is defined as 'id', by can help with types, and
+-- makes widget blocks look more consistent.
+addWidget :: GWidget s m () -> GWidget s m ()
+addWidget = id
 
 -- | Get a unique identifier.
 newIdent :: GWidget sub master String
@@ -102,8 +131,8 @@ newIdent = GWidget $ lift $ lift $ lift $ lift $ lift $ lift $ lift $ do
     return $ "w" ++ show i'
 
 -- | Add some raw CSS to the style tag.
-addStyle :: Cassius (Route master) -> GWidget sub master ()
-addStyle = GWidget . lift . lift . lift . lift . tell . Just
+addCassius :: Cassius (Route master) -> GWidget sub master ()
+addCassius = GWidget . lift . lift . lift . lift . tell . Just
 
 -- | Link to the specified local stylesheet.
 addStylesheet :: Route master -> GWidget sub master ()
@@ -130,18 +159,8 @@ addScriptRemote =
     GWidget . lift . lift . tell . toUnique . Script . Remote
 
 -- | Include raw Javascript in the page's script tag.
-addJavascript :: Julius (Route master) -> GWidget sub master ()
-addJavascript = GWidget . lift . lift . lift . lift . lift. tell . Just
-
--- | Modify the given 'GWidget' by wrapping the body tag HTML code with the
--- given function. You might also consider using 'extractBody'.
-wrapWidget :: GWidget s m a
-           -> (Hamlet (Route m) -> Hamlet (Route m))
-           -> GWidget s m a
-wrapWidget (GWidget w) wrap =
-    GWidget $ mapWriterT (fmap go) w
-  where
-    go (a, Body h) = (a, Body $ wrap h)
+addJulius :: Julius (Route master) -> GWidget sub master ()
+addJulius = GWidget . lift . lift . lift . lift . lift. tell . Just
 
 -- | Pull out the HTML tag contents and return it. Useful for performing some
 -- manipulations. It can be easier to use this sometimes than 'wrapWidget'.

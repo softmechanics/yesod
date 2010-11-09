@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE PackageImports #-}
+-- | This module simply re-exports from other modules for your convenience.
 module Yesod
     ( module Yesod.Request
     , module Yesod.Content
@@ -13,8 +13,10 @@ module Yesod
     , Application
     , lift
     , liftIO
-    , MonadCatchIO
+    , MonadInvertIO
     , mempty
+    , showIntegral
+    , readIntegral
     ) where
 
 #if TEST
@@ -36,7 +38,16 @@ import Yesod.Form
 import Yesod.Widget
 import Network.Wai (Application)
 import Yesod.Hamlet
-import "transformers" Control.Monad.Trans.Class (lift)
-import "transformers" Control.Monad.IO.Class (liftIO)
-import "MonadCatchIO-transformers" Control.Monad.CatchIO (MonadCatchIO)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.IO.Class (liftIO)
 import Data.Monoid (mempty)
+import Control.Monad.Invert (MonadInvertIO)
+
+showIntegral :: Integral a => a -> String
+showIntegral x = show (fromIntegral x :: Integer)
+
+readIntegral :: Num a => String -> Maybe a
+readIntegral s =
+    case reads s of
+        (i, _):_ -> Just $ fromInteger i
+        [] -> Nothing
