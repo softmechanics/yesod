@@ -120,7 +120,7 @@ import Yesod.Content
 #endif
 
 -- | The type-safe URLs associated with a site argument.
-type family Route a
+data family Route a
 
 data HandlerData sub master = HandlerData
     { handlerRequest :: Request
