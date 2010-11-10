@@ -8,6 +8,7 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE TemplateHaskell #-}
 ---------------------------------------------------------
 --
 -- Module        : Yesod.Handler
@@ -46,6 +47,7 @@ module Yesod.Handler
     , invalidArgs
       -- ** Short-circuit responses.
     , sendFile
+    , embedFile
     , sendResponse
       -- * Setting headers
     , setCookie
@@ -109,6 +111,9 @@ import Control.Monad.Invert (MonadInvertIO (..))
 import Control.Monad (liftM)
 import qualified Data.Map as Map
 
+import Language.Haskell.TH
+import Language.Haskell.TH.Syntax hiding (lift)
+
 #if TEST
 import Test.Framework (testGroup, Test)
 import Test.Framework.Providers.HUnit (testCase)
@@ -120,7 +125,7 @@ import Yesod.Content
 #endif
 
 -- | The type-safe URLs associated with a site argument.
-type family Route a
+data family Route a
 
 data HandlerData sub master = HandlerData
     { handlerRequest :: Request
@@ -374,6 +379,13 @@ getMessage = do
 -- memory, since they can optimize file sending via a system call to sendfile.
 sendFile :: ContentType -> FilePath -> GHandler sub master a
 sendFile ct = GHandler . lift . throwMEither . HCSendFile ct
+
+-- | Embeds a file into haskell source, and returns a GHandler to send it
+embedFile :: ContentType -> FilePath -> ExpQ
+embedFile ct f = do 
+    content <- qRunIO $ readFile f
+    let tup = tupE [(litE $ stringL ct) `sigE` [t| ContentType |], [| toContent |] `appE` ((litE $ stringL content) `sigE` [t| [Char] |])]
+    [| sendResponse |] `appE` tup
 
 -- | Bypass remaining handler code and output the given content.
 sendResponse :: HasReps c => c -> GHandler sub master a
