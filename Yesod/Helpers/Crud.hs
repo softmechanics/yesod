@@ -7,7 +7,8 @@
 module Yesod.Helpers.Crud
     ( Item (..)
     , Crud (..)
-    , CrudRoute (..)
+    , CrudRoute
+    , Route (..)
     , defaultCrud
     ) where
 

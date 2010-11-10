@@ -27,7 +27,8 @@
 module Yesod.Helpers.Static
     ( -- * Subsite
       Static (..)
-    , StaticRoute (..)
+    , StaticRoute
+    , Route (..)
       -- * Lookup files in filesystem
     , fileLookupDir
     , staticFiles
@@ -74,10 +75,10 @@ data Static = Static
 -- would generate a url such as 'http://site.com/static/thumb001.jpg?foo=5&bar=choc'
 -- The StaticRoute constructor can be used when url's cannot be statically generated at compile-time.
 -- E.g. When generating image galleries.
-data StaticRoute = StaticRoute [String] [(String, String)]
-    deriving (Eq, Show, Read)
 
-type instance Route Static = StaticRoute
+data instance Route Static = StaticRoute [String] [(String, String)]
+    deriving (Eq, Show, Read)
+type StaticRoute = Route Static
 
 instance YesodSubSite Static master where
     getSubSite = Site
