@@ -138,8 +138,9 @@ mkYesodGeneral name args clazzes isSub res = do
     th <- mapM (thResourceFromResource arg) res -- FIXME now we cannot have multi-nested subsites
     w' <- createRoutes th
     let routesName = mkName $ name ++ "Route"
-    let w = DataD [] routesName [] w' [''Show, ''Read, ''Eq]
-    let x = TySynInstD ''Route [arg] $ ConT routesName
+    let route = ConT ''Route `AppT` arg
+    let w = DataInstD [] ''Route [arg] w' [''Show, ''Read, ''Eq]
+    let x = TySynD routesName (map PlainTV args') route
 
     parse' <- createParse th
     parse'' <- newName "parse"
@@ -164,7 +165,7 @@ mkYesodGeneral name args clazzes isSub res = do
     let y = InstanceD ctx ytyp
                 [ FunD (mkName yfunc) [Clause [] (NormalB site') []]
                 ]
-    return ([w, x], [y])
+    return ([w,x], [y])
 
 isStatic :: Piece -> Bool
 isStatic StaticPiece{} = True
