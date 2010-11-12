@@ -11,6 +11,7 @@ module Yesod.Yesod
       Yesod (..)
     , YesodSite (..)
     , YesodSubSite (..)
+    , YesodSubRoute (..)
       -- ** Persistence
     , YesodPersist (..)
     , module Database.Persist
