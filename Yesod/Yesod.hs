@@ -11,7 +11,6 @@ module Yesod.Yesod
       Yesod (..)
     , YesodSite (..)
     , YesodSubSite (..)
-    , YesodSubRoute (..)
       -- ** Persistence
     , YesodPersist (..)
     , module Database.Persist
@@ -82,9 +81,6 @@ type Method = String
 -- to deal with it directly, as the mkYesodSub creates instances appropriately.
 class Eq (Route s) => YesodSubSite s y where
     getSubSite :: Site (Route s) (Method -> Maybe (GHandler s y ChooseRep))
-
-class YesodSubRoute s y where
-    subRoute :: Route s -> Route y
 
 -- | Define settings for a Yesod applications. The only required setting is
 -- 'approot'; other than that, there are intelligent defaults.
