@@ -31,6 +31,8 @@ module Yesod.Helpers.Static
       -- * Lookup files in filesystem
     , fileLookupDir
     , staticFiles
+    , embedFile
+    , embedFiles
       -- * Hashing
     , base64md5
 #if TEST
@@ -44,6 +46,7 @@ import Data.Maybe (fromMaybe)
 
 import Yesod hiding (lift)
 import Data.List (intercalate)
+import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Web.Routes
 
@@ -153,11 +156,8 @@ staticFiles fp = do
     fs <- qRunIO $ getFileList fp
     concat `fmap` mapM go fs
   where
-    replace' '.' = '_'
-    replace' '-' = '_'
-    replace' c = c
     go f = do
-        let name = mkName $ intercalate "_" $ map (map replace') f
+        let name = mkName $ intercalate "_" $ map fpToId f
         f' <- lift f
         let sr = ConE $ mkName "StaticRoute"
         hash <- qRunIO $ fmap base64md5 $ L.readFile $ fp ++ '/' : intercalate "/" f
@@ -168,6 +168,48 @@ staticFiles fp = do
                 [ Clause [] (NormalB $ sr `AppE` f' `AppE` qs) []
                 ]
             ]
+
+-- | Embeds a file into haskell source, and returns a GHandler to send it
+embedFile :: ContentType -> FilePath -> Q Exp
+embedFile ct f = do
+    content <- qRunIO $ readFile f
+    [| sendResponse |] `appE` tupE [
+                  (litE $ stringL ct) `sigE` [t| ContentType |]
+                , appE [| toContent |] $ (litE $ stringL content) `sigE` [t| [Char] |]
+                ]
+
+embedFiles :: FilePath -> Q [Dec]
+embedFiles d = do
+    fs <- qRunIO $ getFileList d 
+    concat `fmap` mapM go fs
+  where 
+    go f = do
+        let f' = intercalate "/" $ d:f
+            name = mkName $ intercalate "_" $ map fpToId f
+            hndl = ConT $ mkName "GHandler"
+            sub = mkName "sub"
+            master = mkName "master"
+        
+        handler <- embedFile (ct f') f'
+        return 
+            [ SigD name 
+                $ ForallT [PlainTV sub, PlainTV master] []
+                $ hndl `AppT` VarT sub `AppT` VarT master `AppT` TupleT 0
+            , FunD name
+                [ Clause [] (NormalB handler) []
+                ]
+            ]
+
+    ct f = let ext' = ext f
+               (Just v) = lookup ext' typeByExt
+           in v
+
+-- | Converts a FilePath into a valid haskell identifier name
+fpToId :: FilePath -> String
+fpToId = map replace'
+  where replace' '.' = '_'
+        replace' '-' = '_'
+        replace' c = c
 
 #if TEST
 
