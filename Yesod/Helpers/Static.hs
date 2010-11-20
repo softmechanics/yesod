@@ -33,6 +33,8 @@ module Yesod.Helpers.Static
     , staticFiles
     , embedFile
     , embedFiles
+    , mkEmbedFiles
+    , getStaticHandler
       -- * Hashing
     , base64md5
 #if TEST
@@ -107,6 +109,36 @@ fileLookupDir dir = Static $ \fp -> do
     if exists
         then return $ Just $ Left fp'
         else return Nothing
+
+mkEmbedFiles :: FilePath -> Q Exp
+mkEmbedFiles d = do
+    fs <- qRunIO $ getFileList d
+    clauses <- mapM (mkClause . intercalate "/") fs
+    defC <- defaultClause
+    return $ static $ clauses ++ [defC]
+  where static clauses = LetE [fun clauses] $ ConE 'Static `AppE` VarE f
+        f = mkName "f"
+        fun clauses = FunD f clauses
+        defaultClause = do
+          b <- [| return Nothing |]
+          return $ Clause [WildP] (NormalB b) []
+
+        mkClause path = do
+          content <- qRunIO $ readFile $ d ++ '/':path
+          let pat = LitP $ StringL path
+              foldAppE = foldl1 AppE
+              content' = return $ LitE $ StringL $ content
+          body <- normalB [| return $ Just $ Right $ toContent ($content' :: [Char]) |]
+          return $ Clause [pat] body []
+
+getStaticHandler :: Static -> (StaticRoute -> Route sub) -> [String] -> GHandler sub y ChooseRep
+getStaticHandler static toSubR pieces = do
+  toMasterR <- getRouteToMaster   
+  toMasterHandler (toMasterR . toSubR) toSub route handler
+  where route = StaticRoute pieces []
+        toSub _ = static
+        staticSite = getSubSite :: Site (Route Static) (String -> Maybe (GHandler Static y ChooseRep))
+        handler = fromMaybe notFound $ handleSite staticSite undefined route "GET"
 
 getStaticRoute :: [String]
                -> GHandler Static master (ContentType, Content)
@@ -201,7 +233,7 @@ embedFiles d = do
             ]
 
     ct f = let ext' = ext f
-               (Just v) = lookup ext' typeByExt
+               v = fromMaybe typePlain $ lookup ext' typeByExt
            in v
 
 -- | Converts a FilePath into a valid haskell identifier name
