@@ -3,6 +3,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP #-}
 -- | Parse forms (and query strings).
 module Yesod.Form
     ( -- * Data types
@@ -29,6 +30,9 @@ module Yesod.Form
     , runFormMonadPost
     , runFormGet'
     , runFormPost'
+      -- ** High-level form post unwrappers
+    , runFormTable
+    , runFormDivs
       -- * Field/form helpers
     , fieldsToTable
     , fieldsToDivs
@@ -45,6 +49,7 @@ import Yesod.Form.Core
 import Yesod.Form.Fields
 import Yesod.Form.Class
 import Yesod.Form.Profiles (Textarea (..))
+import Yesod.Widget (GWidget)
 
 import Text.Hamlet
 import Yesod.Request
@@ -68,7 +73,12 @@ fieldsToPlain = mapFormXml $ mapM_ fiInput
 fieldsToTable :: FormField sub y a -> Form sub y a
 fieldsToTable = mapFormXml $ mapM_ go
   where
-    go fi = [$hamlet|
+    go fi =
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
 %tr.$clazz.fi$
     %td
         %label!for=$fiIdent.fi$ $fiLabel.fi$
@@ -84,7 +94,12 @@ fieldsToTable = mapFormXml $ mapM_ go
 fieldsToDivs :: FormField sub y a -> Form sub y a
 fieldsToDivs = mapFormXml $ mapM_ go
   where
-    go fi = [$hamlet|
+    go fi =
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
 .$clazz.fi$
     %label!for=$fiIdent.fi$ $fiLabel.fi$
         .tooltip $fiTooltip.fi$
@@ -121,7 +136,14 @@ runFormPost f = do
                 _ -> res
     return (res', xml, enctype, hidden nonce)
   where
-    hidden nonce = [$hamlet|%input!type=hidden!name=$nonceName$!value=$nonce$|]
+    hidden nonce =
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
+    %input!type=hidden!name=$nonceName$!value=$nonce$
+|]
 
 nonceName :: String
 nonceName = "_nonce"
@@ -144,6 +166,51 @@ runFormPost' f = do
     x <- runFormGeneric pp files f
     helper x
 
+-- | Create a table-styled form.
+--
+-- This function wraps around 'runFormPost' and 'fieldsToTable', taking care of
+-- some of the boiler-plate in creating forms. In particular, is automatically
+-- creates the form element, sets the method, action and enctype attributes,
+-- adds the CSRF-protection nonce hidden field and inserts a submit button.
+runFormTable :: Route m -> String -> FormField s m a
+             -> GHandler s m (FormResult a, GWidget s m ())
+runFormTable dest inputLabel form = do
+    (res, widget, enctype, nonce) <- runFormPost $ fieldsToTable form
+    let widget' =
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
+%form!method=post!action=@dest@!enctype=$enctype$
+    %table
+        ^widget^
+        %tr
+            %td!colspan=2
+            $nonce$
+            %input!type=submit!value=$inputLabel$
+|]
+    return (res, widget')
+
+-- | Same as 'runFormPostTable', but uses 'fieldsToDivs' for styling.
+runFormDivs :: Route m -> String -> FormField s m a
+            -> GHandler s m (FormResult a, GWidget s m ())
+runFormDivs dest inputLabel form = do
+    (res, widget, enctype, nonce) <- runFormPost $ fieldsToDivs form
+    let widget' =
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
+%form!method=post!action=@dest@!enctype=$enctype$
+    ^widget^
+    %div
+        $nonce$
+        %input!type=submit!value=$inputLabel$
+|]
+    return (res, widget')
+
 -- | Run a form against GET parameters, disregarding the resulting HTML and
 -- returning an error response on invalid input.
 runFormGet' :: GForm sub y xml a -> GHandler sub y a
@@ -160,7 +227,14 @@ generateForm :: GForm s m xml a -> GHandler s m (xml, Enctype, Html)
 generateForm f = do
     (_, b, c) <- runFormGeneric [] [] f
     nonce <- fmap reqNonce getRequest
-    return (b, c, [$hamlet|%input!type=hidden!name=$nonceName$!value=$nonce$|])
+    return (b, c,
+#if GHC7
+                [hamlet|
+#else
+                [$hamlet|
+#endif
+    %input!type=hidden!name=$nonceName$!value=$nonce$
+|])
 
 -- | Run a form against GET parameters.
 runFormGet :: GForm s m xml a -> GHandler s m (FormResult a, xml, Enctype)

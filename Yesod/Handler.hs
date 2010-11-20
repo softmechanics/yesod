@@ -24,6 +24,7 @@
 module Yesod.Handler
     ( -- * Type families
       Route
+    , YesodSubRoute (..)
       -- * Handler monad
     , GHandler
       -- ** Read information from handler
@@ -75,6 +76,7 @@ module Yesod.Handler
     , runHandler
     , YesodApp (..)
     , toMasterHandler
+    , toMasterHandlerMaybe
     , localNoCurrent
     , HandlerData
     , ErrorResponse (..)
@@ -122,6 +124,9 @@ import Yesod.Content
 -- | The type-safe URLs associated with a site argument.
 type family Route a
 
+class YesodSubRoute s y where
+    fromSubRoute :: s -> y -> Route s -> Route y
+
 data HandlerData sub master = HandlerData
     { handlerRequest :: Request
     , handlerSub :: sub
@@ -136,10 +141,17 @@ handlerSubData :: (Route sub -> Route master)
                -> Route sub
                -> HandlerData oldSub master
                -> HandlerData sub master
-handlerSubData tm ts route hd = hd
+handlerSubData tm ts = handlerSubDataMaybe tm ts . Just
+
+handlerSubDataMaybe :: (Route sub -> Route master)
+                    -> (master -> sub)
+                    -> Maybe (Route sub)
+                    -> HandlerData oldSub master
+                    -> HandlerData sub master
+handlerSubDataMaybe tm ts route hd = hd
     { handlerSub = ts $ handlerMaster hd
     , handlerToMaster = tm
-    , handlerRoute = Just route
+    , handlerRoute = route
     }
 
 -- | Used internally for promoting subsite handler functions to master site
@@ -148,9 +160,17 @@ toMasterHandler :: (Route sub -> Route master)
                 -> (master -> sub)
                 -> Route sub
                 -> GHandler sub master a
-                -> GHandler master master a
+                -> GHandler sub' master a
 toMasterHandler tm ts route (GHandler h) =
     GHandler $ withReaderT (handlerSubData tm ts route) h
+
+toMasterHandlerMaybe :: (Route sub -> Route master)
+                     -> (master -> sub)
+                     -> Maybe (Route sub)
+                     -> GHandler sub master a
+                     -> GHandler sub' master a
+toMasterHandlerMaybe tm ts route (GHandler h) =
+    GHandler $ withReaderT (handlerSubDataMaybe tm ts route) h
 
 -- | A generic handler monad, which can have a different subsite and master
 -- site. This monad is a combination of 'ReaderT' for basic arguments, a

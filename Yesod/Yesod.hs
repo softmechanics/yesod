@@ -54,7 +54,7 @@ import Database.Persist
 import Control.Monad.Trans.Class (MonadTrans (..))
 import Control.Failure (Failure)
 import qualified Data.ByteString as S
-import qualified Network.Wai.Middleware.CleanPath
+import qualified Data.ByteString.Char8 as S8
 import qualified Data.ByteString.Lazy as L
 import Data.Monoid
 import Control.Monad.Trans.Writer
@@ -69,6 +69,12 @@ import Test.Framework (testGroup, Test)
 import Test.Framework.Providers.HUnit
 import Test.Framework.Providers.QuickCheck2 (testProperty)
 import Test.HUnit hiding (Test)
+#endif
+
+#if GHC7
+#define HAMLET hamlet
+#else
+#define HAMLET $hamlet
 #endif
 
 -- | This class is automatically instantiated when you use the template haskell
@@ -115,7 +121,7 @@ class Eq (Route a) => Yesod a where
     defaultLayout w = do
         p <- widgetToPageContent w
         mmsg <- getMessage
-        hamletToRepHtml [$hamlet|
+        hamletToRepHtml [HAMLET|
 !!!
 %html
     %head
@@ -179,7 +185,46 @@ class Eq (Route a) => Yesod a where
     --
     -- * Otherwise, ensures there /is/ a trailing slash.
     splitPath :: a -> S.ByteString -> Either S.ByteString [String]
-    splitPath _ = Network.Wai.Middleware.CleanPath.splitPath
+    splitPath _ s =
+        if corrected == s
+            then Right $ filter (not . null)
+                       $ decodePathInfo
+                       $ S8.unpack s
+            else Left corrected
+      where
+        corrected = S8.pack $ rts $ ats $ rds $ S8.unpack s
+
+        -- | Remove double slashes
+        rds :: String -> String
+        rds [] = []
+        rds [x] = [x]
+        rds (a:b:c)
+            | a == '/' && b == '/' = rds (b:c)
+            | otherwise = a : rds (b:c)
+
+        -- | Add a trailing slash if it is missing. Empty string is left alone.
+        ats :: String -> String
+        ats [] = []
+        ats t =
+            if last t == '/' || dbs (reverse t)
+                then t
+                else t ++ "/"
+
+        -- | Remove a trailing slash if the last piece has a period.
+        rts :: String -> String
+        rts [] = []
+        rts t =
+            if last t == '/' && dbs (tail $ reverse t)
+                then init t
+                else t
+
+        -- | Is there a period before a slash here?
+        dbs :: String -> Bool
+        dbs ('/':_) = False
+        dbs (_:'.':_) = True
+        dbs (_:x) = dbs x
+        dbs [] = False
+
 
     -- | Join the pieces of a path together into an absolute URL. This should
     -- be the inverse of 'splitPath'.
@@ -189,9 +234,12 @@ class Eq (Route a) => Yesod a where
       where
         fixSegs [] = []
         fixSegs [x]
-            | any (== '.') x = [x]
+            | anyButLast (== '.') x = [x]
             | otherwise = [x, ""] -- append trailing slash
         fixSegs (x:xs) = x : fixSegs xs
+        anyButLast _ [] = False
+        anyButLast _ [_] = False
+        anyButLast p (x:xs) = p x || anyButLast p xs
 
     -- | This function is used to store some static content to be served as an
     -- external file. The most common case of this is stashing CSS and
@@ -267,32 +315,55 @@ applyLayout' title body = fmap chooseRep $ defaultLayout $ do
 defaultErrorHandler :: Yesod y => ErrorResponse -> GHandler sub y ChooseRep
 defaultErrorHandler NotFound = do
     r <- waiRequest
-    let path' = bsToChars $ pathInfo r
-    applyLayout' "Not Found" $ [$hamlet|
+    let path' = bsToChars $ W.pathInfo r
+    applyLayout' "Not Found"
+#if GHC7
+        [hamlet|
+#else
+        [$hamlet|
+#endif
 %h1 Not Found
 %p $path'$
 |]
-  where
-    pathInfo = W.pathInfo
 defaultErrorHandler (PermissionDenied msg) =
-    applyLayout' "Permission Denied" $ [$hamlet|
+    applyLayout' "Permission Denied"
+#if GHC7
+        [hamlet|
+#else
+        [$hamlet|
+#endif
 %h1 Permission denied
 %p $msg$
 |]
 defaultErrorHandler (InvalidArgs ia) =
-    applyLayout' "Invalid Arguments" $ [$hamlet|
+    applyLayout' "Invalid Arguments"
+#if GHC7
+        [hamlet|
+#else
+        [$hamlet|
+#endif
 %h1 Invalid Arguments
 %ul
     $forall ia msg
         %li $msg$
 |]
 defaultErrorHandler (InternalError e) =
-    applyLayout' "Internal Server Error" $ [$hamlet|
+    applyLayout' "Internal Server Error"
+#if GHC7
+        [hamlet|
+#else
+        [$hamlet|
+#endif
 %h1 Internal Server Error
 %p $e$
 |]
 defaultErrorHandler (BadMethod m) =
-    applyLayout' "Bad Method" $ [$hamlet|
+    applyLayout' "Bad Method"
+#if GHC7
+        [hamlet|
+#else
+        [$hamlet|
+#endif
 %h1 Method Not Supported
 %p Method "$m$" not supported
 |]
@@ -372,7 +443,12 @@ widgetToPageContent (GWidget w) = do
                    $ renderJulius render s
                 return $ renderLoc x
 
-    let head'' = [$hamlet|
+    let head'' =
+#if GHC7
+            [hamlet|
+#else
+            [$hamlet|
+#endif
 $forall scripts s
     %script!src=^s^
 $forall stylesheets s
@@ -395,6 +471,7 @@ $maybe jscript j
 testSuite :: Test
 testSuite = testGroup "Yesod.Yesod"
     [ testProperty "join/split path" propJoinSplitPath
+    , testCase "join/split path [\".\"]" caseJoinSplitPathDquote
     , testCase "utf8 split path" caseUtf8SplitPath
     , testCase "utf8 join path" caseUtf8JoinPath
     ]
@@ -410,6 +487,17 @@ propJoinSplitPath ss =
         == Right ss'
   where
     ss' = filter (not . null) ss
+
+caseJoinSplitPathDquote :: Assertion
+caseJoinSplitPathDquote = do
+    splitPath TmpYesod (BSU.fromString "/x%2E/") @?= Right ["x."]
+    splitPath TmpYesod (BSU.fromString "/y./") @?= Right ["y."]
+    joinPath TmpYesod "" ["z."] [] @?= "/z./"
+    x @?= Right ss
+  where
+    x = splitPath TmpYesod (BSU.fromString $ joinPath TmpYesod "" ss' [])
+    ss' = filter (not . null) ss
+    ss = ["a."]
 
 caseUtf8SplitPath :: Assertion
 caseUtf8SplitPath = do
@@ -434,7 +522,12 @@ caseUtf8JoinPath = do
 -- useful when you need to post a plain link somewhere that needs to cause
 -- changes on the server.
 redirectToPost :: Route master -> GHandler sub master a
-redirectToPost dest = hamletToRepHtml [$hamlet|
+redirectToPost dest = hamletToRepHtml
+#if GHC7
+            [hamlet|
+#else
+            [$hamlet|
+#endif
 !!!
 %html
     %head
