@@ -10,6 +10,7 @@ module Yesod.Dispatch
     , mkYesodSub
       -- ** More fine-grained
     , mkYesodData
+    , mkYesodSubData
     , mkYesodDispatch
       -- ** Path pieces
     , SinglePiece (..)
@@ -112,8 +113,15 @@ mkYesodSub name clazzes =
 -- monolithic file into smaller parts. Use this function, paired with
 -- 'mkYesodDispatch', to do just that.
 mkYesodData :: String -> [Resource] -> Q [Dec]
-mkYesodData name res = do
-    (x, _) <- mkYesodGeneral name [] [] False res
+mkYesodData name res = mkYesodDataGeneral name [] False res
+
+mkYesodSubData :: String -> Cxt -> [Resource] -> Q [Dec]
+mkYesodSubData name clazzes res = mkYesodDataGeneral name clazzes True res
+
+mkYesodDataGeneral :: String -> Cxt -> Bool -> [Resource] -> Q [Dec]
+mkYesodDataGeneral name clazzes isSub res = do
+    let (name':rest) = words name
+    (x, _) <- mkYesodGeneral name' rest clazzes isSub res
     let rname = mkName $ "resources" ++ name
     eres <- lift res
     let y = [ SigD rname $ ListT `AppT` ConT ''Resource
@@ -165,7 +173,7 @@ mkYesodGeneral name args clazzes isSub res = do
     let y = InstanceD ctx ytyp
                 [ FunD (mkName yfunc) [Clause [] (NormalB site') []]
                 ]
-    return ([w, x] ++ ysr, [y])
+    return ([w, x], [y] ++ ysr)
 
 isStatic :: Piece -> Bool
 isStatic StaticPiece{} = True
