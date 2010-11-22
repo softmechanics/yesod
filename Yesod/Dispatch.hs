@@ -184,11 +184,11 @@ fromStatic (StaticPiece s) = s
 fromStatic _ = error "fromStatic"
 
 yesodSubRouteInstance :: Type -> Resource -> Q (Maybe Dec)
-yesodSubRouteInstance _ (Resource _ _ atts) 
+yesodSubRouteInstance master (Resource n ps atts) 
     | all (all isUpper) atts = return Nothing
-yesodSubRouteInstance master (Resource n ps atts@[stype, toSubArg]) 
     | all isStatic ps && any (any isLower) atts = do
-        let ysrName = mkName "YesodSubRoute"
+        let stype = head atts
+            ysrName = mkName "YesodSubRoute"
             sub = ConT $ mkName stype
         exists <- isClassInstance ysrName [sub, master]
         if exists 
