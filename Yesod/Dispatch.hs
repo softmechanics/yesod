@@ -140,6 +140,7 @@ mkYesodGeneral name args clazzes isSub res = do
     let routesName = mkName $ name ++ "Route"
     let w = DataD [] routesName [] w' [''Show, ''Read, ''Eq]
     let x = TySynInstD ''Route [arg] $ ConT routesName
+    ysr <- catMaybes `fmap` mapM (yesodSubRouteInstance arg) res
 
     parse' <- createParse th
     parse'' <- newName "parse"
@@ -164,7 +165,7 @@ mkYesodGeneral name args clazzes isSub res = do
     let y = InstanceD ctx ytyp
                 [ FunD (mkName yfunc) [Clause [] (NormalB site') []]
                 ]
-    return ([w, x], [y])
+    return ([w, x] ++ ysr, [y])
 
 isStatic :: Piece -> Bool
 isStatic StaticPiece{} = True
@@ -173,6 +174,25 @@ isStatic _ = False
 fromStatic :: Piece -> String
 fromStatic (StaticPiece s) = s
 fromStatic _ = error "fromStatic"
+
+yesodSubRouteInstance :: Type -> Resource -> Q (Maybe Dec)
+yesodSubRouteInstance _ (Resource _ _ atts) 
+    | all (all isUpper) atts = return Nothing
+yesodSubRouteInstance master (Resource n ps atts@[stype, toSubArg]) 
+    | all isStatic ps && any (any isLower) atts = do
+        let ysrName = mkName "YesodSubRoute"
+            sub = ConT $ mkName stype
+        exists <- isClassInstance ysrName [sub, master]
+        if exists 
+           then return Nothing
+           else do 
+             let ysr = ConT ysrName
+                 head = ysr `AppT` sub `AppT` master
+                 body = NormalB $ ConE $ mkName n
+                 clause = Clause [WildP, WildP] body []
+                 fsr = FunD (mkName "fromSubRoute") [clause]
+                 inst = InstanceD [] head [fsr]
+             return $ Just inst
 
 thResourceFromResource :: Type -> Resource -> Q THResource
 thResourceFromResource _ (Resource n ps attribs)
