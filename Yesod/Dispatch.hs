@@ -12,6 +12,7 @@ module Yesod.Dispatch
     , mkYesodData
     , mkYesodSubData
     , mkYesodDispatch
+    , mkYesodSubDispatch 
       -- ** Path pieces
     , SinglePiece (..)
     , MultiPiece (..)
@@ -132,6 +133,10 @@ mkYesodDataGeneral name clazzes isSub res = do
 -- | See 'mkYesodData'.
 mkYesodDispatch :: String -> [Resource] -> Q [Dec]
 mkYesodDispatch name = fmap snd . mkYesodGeneral name [] [] False
+
+mkYesodSubDispatch :: String -> Cxt -> [Resource] -> Q [Dec]
+mkYesodSubDispatch name clazzes = fmap snd . mkYesodGeneral name' rest clazzes True 
+  where (name':rest) = words name
 
 mkYesodGeneral :: String -- ^ argument name
                -> [String] -- ^ parameters for site argument
