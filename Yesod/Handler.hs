@@ -76,6 +76,7 @@ module Yesod.Handler
     , runHandler
     , YesodApp (..)
     , toMasterHandler
+    , runMasterHandler
     , toMasterHandlerMaybe
     , localNoCurrent
     , HandlerData
@@ -163,6 +164,10 @@ toMasterHandler :: (Route sub -> Route master)
                 -> GHandler sub' master a
 toMasterHandler tm ts route (GHandler h) =
     GHandler $ withReaderT (handlerSubData tm ts route) h
+
+-- | Run a master handler from a sub handler
+runMasterHandler :: GHandler master master a -> GHandler sub master a
+runMasterHandler = toMasterHandlerMaybe id id Nothing 
 
 toMasterHandlerMaybe :: (Route sub -> Route master)
                      -> (master -> sub)
